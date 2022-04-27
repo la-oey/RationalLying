@@ -202,6 +202,10 @@ body {
     width: 100%;
 }
 
+#trueDraw {
+    font-size: 30px;
+}
+
 #subjResponse {
     position: relative;
     float: right;
@@ -209,6 +213,10 @@ body {
     width: 70%;
     margin-left: 15%;
     margin-right: 15%;
+}
+
+#responseAccRej {
+    font-size: 14px;
 }
 
 #reportMarbles {
