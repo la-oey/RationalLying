@@ -12,8 +12,9 @@ library(lmerTest)
 library(cowplot)
 knitr::opts_chunk$set(echo = TRUE)
 
-raw.red <- read_csv("red_raw.csv")
-raw.blue <- read_csv("blue_raw.csv")
+raw.red <- read_csv("expt1_red_raw.csv")
+raw.blue <- read_csv("expt1_blue_raw.csv")
+raw.e2 <- read_csv("expt2_raw.csv")
 load("Rdata/noToMfit.Rdata")
 load("Rdata/recurseToMfit.Rdata")
 
@@ -61,9 +62,9 @@ Subjects that failed to meet the catch question exclusionary criteria
 exclude.catch <- raw %>%
   filter(catchKey != -1) %>%
   group_by(subjID) %>%
-  # summarise(catchAcc = sum(abs(catchResponse - catchKey) <= 1)/n()) %>% # less strict criteria
-  summarise(catchAcc = sum(catchResponse == catchKey)/n()) %>%
-  filter(catchAcc <= .75) %>%
+  summarise(catchAcc = mean(abs(catchResponse - catchKey)<=1)) %>% # less strict criteria
+  # summarise(catchAcc = sum(catchResponse == catchKey)/n()) %>%
+  filter(catchAcc < .75) %>%
   pull(subjID)
 
 length(exclude.catch)
@@ -102,6 +103,9 @@ length(unique(df$subjID))
 
 expt.S.full <- df %>% filter(role == "sender")
 expt.R.full <- df %>% filter(role == "receiver")
+
+# write.csv(expt.S.full, "expt_sender_full.csv")
+# write.csv(expt.R.full, "expt_receiver_full.csv")
 ```
 
 ## SENDER ##
@@ -128,7 +132,7 @@ expt.S.full %>%
         legend.title = element_text(size=8),
         legend.text = element_text(size=8),
         legend.position = "bottom")
-ggsave("img/expt1probLie.pdf", width=8, height=4.5)
+ggsave("img/expt1ratelies.pdf", width=8, height=4.5)
 
 
 contrasts(expt.S.full$util) <- contr.sum(2)
@@ -139,12 +143,12 @@ coef.lieRate <- summary(m.lieRate)$coef
 
 var.lieRate <- coef.lieRate['k','Std. Error']^2 + coef.lieRate['k:util1','Std. Error']^2 + 2*vcov(m.lieRate)['k','k:util1']
 se.lieRate <- sqrt(var.lieRate) #sum of variances
-est.red <- coef.lieRate['k','Estimate'] + coef.lieRate['k:util1','Estimate'] #slope red
+(est.red <- coef.lieRate['k','Estimate'] + coef.lieRate['k:util1','Estimate']) #slope red
 (z.red <- est.red / se.lieRate)
 2*pnorm(-abs(z.red))
 c(est.red - se.lieRate, est.red + se.lieRate)
 
-est.blue <- coef.lieRate['k','Estimate'] - coef.lieRate['k:util1','Estimate'] #slope blue
+(est.blue <- coef.lieRate['k','Estimate'] - coef.lieRate['k:util1','Estimate']) #slope blue
 (z.blue <- est.blue / se.lieRate)
 2*pnorm(-abs(z.blue))
 c(est.blue - se.lieRate, est.blue + se.lieRate)
@@ -158,6 +162,7 @@ c(est.blue - se.lieRate, est.blue + se.lieRate)
 # linear model fit ksay given lie, k
 expt.S.lies <- expt.S.full %>%
   filter(k != ksay)
+
 
 lies.lm.df <- data.frame()
 for(pi in unique(expt.S.lies$p)){
@@ -184,6 +189,7 @@ lies.lm.df <- lies.lm.df %>%
          lm = paste0("y = ", beta_0_txt, " + ", beta_1_txt, "x"),
          beta_1_p = ifelse(beta_1_p < .0001, "p < 0.0001", paste("p =", round(beta_1_p, 4))),
          util=factor(util, levels=c("player gets points for red", "player gets points for blue")))
+lies.lm.df
 
 expt.S.lies %>%
   mutate(p=paste("p =", p),
@@ -206,6 +212,37 @@ expt.S.lies %>%
         axis.text=element_text(size=10),
         axis.title=element_text(size=12))
 ggsave("img/expt1lmlies.pdf", width=8.2, height=5)
+```
+
+General relationship between lies reported and what was actually drawn
+
+```{r}
+summary(lm(ksay ~ k, data=expt.S.lies))
+cor.test(expt.S.lies$k, expt.S.lies$ksay)
+
+expt.S.lies.red <- filter(expt.S.lies, util=="red")
+summary(lm(ksay ~ k, data=expt.S.lies.red))
+cor.test(expt.S.lies.red$k, expt.S.lies.red$ksay)
+expt.S.lies.blue <- filter(expt.S.lies, util=="blue")
+summary(lm(ksay ~ k, data=expt.S.lies.blue))
+cor.test(expt.S.lies.blue$k, expt.S.lies.blue$ksay)
+```
+
+```{r}
+centeredLies <- expt.S.lies %>%
+  mutate(p = as.factor(p),
+         k = k - 5)
+
+model_mean <- lmer(ksay ~ k * p * util + (1 | subjID), data=centeredLies, REML=F)
+
+model_mean_nop <- lmer(ksay ~ k * util + (1 | subjID), data=centeredLies, REML=F)
+anova(model_mean_nop, model_mean, test="Chisq")
+model_mean_noexpt <- lmer(ksay ~ k * p + (1 | subjID), data=centeredLies, REML=F)
+anova(model_mean_noexpt, model_mean, test="Chisq")
+
+# interaction
+# model_mean_nointer <- lmer(ksay ~ k + p + util + k:p + k:util + (1 | subjID), data=centeredLies, REML=F)
+# anova(model_mean_nointer, model_mean, test="Chisq")
 ```
 
 ### Model Predictions
@@ -252,7 +289,8 @@ recurse.S.pred.df <- recurseToM.pred(
   0, # recurseToMeval@coef['eta.S','Estimate'],
   recurseToMeval@coef['eta.R','Estimate'],
   recurseToMeval@coef['lambda','Estimate'],
-  recurseToMeval@coef['weight','Estimate'])[[2]] %>%
+  probToLogit(0.99) #recurseToMeval@coef['weight','Estimate']
+  )[[2]] %>%
   ToMToTibble()
 
 noToM.S.pred.df <- noToM.s.pred(
@@ -325,7 +363,6 @@ for(t in unique(m.uncount$type)){
     temp = filter(m.uncount, p==pi & type==t) %>%
       mutate(k = k-5)
     summ = summary(lm(ksay ~ k, data=temp))
-    print(summ)
     m.lies.lm.df <- bind_rows(m.lies.lm.df,
                               data.frame(type=t,
                                          p=pi,
@@ -386,6 +423,7 @@ lies.lm.df %>%
         axis.title=element_text(size=12))
 ggsave("img/modelmeanlies.pdf", width=9, height=3.5)
 ```
+
 
 
 ## RECEIVER ##
@@ -516,6 +554,16 @@ compare.means.br <- function(c1, c2){
 (z.8.2 <- compare.means.br("0.8","0.2"))
 2*pnorm(-abs(z.8.2))
 
+
+quadr.summ.utils <- quadr.fits %>%
+  filter(var == "b") %>%
+  select(p, util, est, se)
+
+quadr.summ.utils %>%
+  mutate(lower = est-1.96*se,
+         upper = est+1.96*se) %>%
+  arrange(p, util)
+
 compare.means.payoff <- function(pr){
   tempdf <- filter(quadr.fits, var=="b" & prob==pr)
   cond.r <- filter(tempdf, util=="red")
@@ -531,6 +579,7 @@ compare.means.payoff("0.2")
 compare.means.payoff("0.5")
 compare.means.payoff("0.8")
 ```
+
 
 ```{r fig-constants}
 ##### Constants #####
@@ -623,17 +672,380 @@ quadr.fits.ab <- expt.R.full %>%
 quadr.fits.plot <- plot_grid(quadr.fits.ab, 
                              quadr.fits.c, 
                              nrow=2, rel_heights=c(5.5,4.9))
+quadr.fits.plot
 
 ggsave(quadr.fits.plot, filename="img/expt1detectResults.pdf", height=8, width=4)
 ```
 
 
+
 # EXPERIMENT 2 #
 
 ## CLEAN DATA ##
+```{r}
+# number of trials per condition
+raw.e2 %>%
+  count(roleCurrent, probBullshitterRed, probBullshitDetectorRed)
 
+length(unique(raw.e2$subjID))
+
+raw.e2 <- raw.e2 %>%
+  rename(role = roleCurrent,
+         p.s = probBullshitterRed,
+         p.r = probBullshitDetectorRed,
+         k = drawnRed,
+         ksay = reportedDrawn) %>%
+  mutate(catchQuestion = ifelse(catchResponse == -1, "NA", catchQuestion),
+         catchQuestionAbbr = case_when(
+           catchQuestion == "What was the proportion of red to blue marbles from your opponent's perspective?" ~ "baseRateOpp",
+           catchQuestion == "What was the proportion of red to blue marbles from your perspective?" ~ "baseRatePla",
+           catchQuestion == "How many red marbles did your opponent report drawing?" ~ "reportOpp",
+           catchQuestion == "How many red marbles did you actually draw?" ~ "samplePla"
+         ),
+         p.s.txt = paste("p_s =", p.s),
+         p.r.txt = paste("p_r =", p.r),
+         role = ifelse(role=="bullshitter", "Sender", "Receiver"))
+  
+```
+
+```{r}
+exclude.catch.e2 <- raw.e2 %>% 
+  filter(catchQuestionAbbr %in% c("reportOpp", "samplePla")) %>% 
+  group_by(subjID) %>% 
+  # summarise(accuracy = sum(catchResponse == catchKey)/n()) %>% # more strict criteria
+  summarise(accuracy = mean(abs(catchResponse - catchKey)<=1)) %>% # less strict criteria (used in CogSci paper)
+  filter(accuracy < .75) %>%
+  pull(subjID)
+
+length(exclude.catch.e2)
+```
+
+```{r}
+df.e2 <- raw.e2 %>%
+  filter(exptPart == "trial") %>%
+  filter(!subjID %in% exclude.catch.e2) %>%
+  select(c(subjID, trialNumber, role, p.s, p.r, k, ksay, callBS, p.s.txt, p.r.txt))
+
+br.e2 <- raw.e2 %>%
+  filter(subjID %in% unique(df.e2$subjID)) %>%
+  filter(catchQuestionAbbr %in% c("baseRateOpp", "baseRatePla")) %>%
+  select(c(subjID, trialNumber, role, p.s, p.r, k, ksay, callBS, p.s.txt, p.r.txt, catchQuestionAbbr, catchQuestion, catchKey, catchResponse))
+
+allps <- br.e2 %>%
+  group_by(role, catchQuestionAbbr, p.s.txt, p.s, p.r) %>%
+  summarise(p.star = mean(catchResponse)/100,
+            n = n())
+```
+
+## VALIDATION CHECK ##
+
+```{r}
+allps.temp <- allps %>%
+  mutate(role = factor(paste("Player as", role), 
+                      levels=c("Player as Sender", "Player as Receiver")),
+         catchQuestionAbbr = case_when(
+           catchQuestionAbbr == "baseRateOpp" ~ "Proportion of red to blue marbles from your opponent's perspective?",
+           catchQuestionAbbr == "baseRatePla" ~ "Proportion of red to blue marbles from your perspective?"
+         ))
+
+br.e2 %>%
+  mutate(catchResponse = catchResponse / 100,
+         role = factor(paste("Player as", role), 
+                       levels=c("Player as Sender", "Player as Receiver")),
+         catchQuestionAbbr = case_when(
+           catchQuestionAbbr == "baseRateOpp" ~ "Proportion of red to blue marbles from your opponent's perspective?",
+           catchQuestionAbbr == "baseRatePla" ~ "Proportion of red to blue marbles from your perspective?"
+         )) %>%
+  ggplot(aes(x=p.r, y=catchResponse, colour=p.s.txt, fill=p.s.txt)) +
+  geom_line(data=allps.temp, aes(x=p.r, y=p.star, colour=p.s.txt),
+            size=1.2, alpha=0.8) +
+  stat_summary(fun.data="mean_se", shape=21, colour="black") +
+  scale_x_continuous("Receiver's true base rate", 
+                     breaks=c(0.2, 0.5, 0.8), labels=c("20% red", "50% red", "80% red")) +
+  scale_y_continuous("Perceived base rate of red", limits=c(0,1), expand=c(0,0)) +
+  scale_colour_manual(values = my_red) +
+  scale_fill_manual("Sender's true base rate",
+                    values=my_red, labels=c("20% red", "50% red", "80% red")) +
+  guides(colour=F) +
+  facet_grid(role ~ catchQuestionAbbr) +
+  theme_bw() +
+  theme(strip.background = element_rect(fill="snow2"),
+        strip.text = element_text(size=10),
+        panel.spacing = unit(1.5, "lines"),
+        axis.title = element_text(size=12),
+        legend.position="bottom",
+        legend.title = element_text(margin = margin(r = 1, unit = "cm")),
+        legend.text = element_text(margin = margin(r = 0.6, unit = "cm")))
+ggsave("img/expt2brResponses.png", height=6.9, width=6.5)
+```
+
+```{r}
+brResp <- br.e2 %>%
+  rename(q = catchQuestionAbbr) %>%
+  mutate(p.s = p.s -.5, 
+         p.r = p.r -.5) %>%
+  mutate_at(c("p.s.txt", "p.r.txt", "q", "role"), as.factor) %>%
+  mutate(p.s.txt = relevel(p.s.txt, ref="p_s = 0.5"), #set reference level to 0.5
+         p.r.txt = relevel(p.r.txt, ref="p_r = 0.5"))
+
+contrasts(brResp$p.s.txt)
+
+# Does the sender notice the receiver's base-rate?
+model.1c <- lm(catchResponse ~ p.s.txt * p.r.txt, data=filter(brResp, role=="Sender" & q=="baseRateOpp"))
+anova(lm(catchResponse ~ p.s.txt, data=filter(brResp, role=="Sender" & q=="baseRateOpp")), model.1c) # F(6,636) = 17.06, p < 0.0001
+anova(lm(catchResponse ~ p.r.txt, data=filter(brResp, role=="Sender" & q=="baseRateOpp")), model.1c) # F(6,636) = 11.59, p < 0.0001
+
+# Does the sender believe the receiver has divergent beliefs?
+model.2c <- lm(catchResponse ~ q * p.r.txt + q * p.s.txt, data=filter(brResp, role=="Sender"))
+anova(lm(catchResponse ~ p.r.txt + q * p.s.txt, data=filter(brResp, role=="Sender")), model.2c) # F(2,1242) = 10.72, p < 0.0001
+anova(lm(catchResponse ~ q * p.r.txt + p.s.txt, data=filter(brResp, role=="Sender")), model.2c) # F(2,1242) = 21.74, p < 0.0001
+
+# Does the receiver assume the sender shares the same beliefs as themselves?
+# correlated (c) receiver's belief about opponent, and (d) receiver's own belief
+df_cd <- br.e2 %>%
+  filter(role == "Sender") %>%
+  mutate(p.r = as.factor(p.r),
+         p.s = as.factor(p.s),
+         catchQuestionAbbr = as.factor(catchQuestionAbbr)) %>%
+  group_by(catchQuestionAbbr, p.s, p.r) %>%
+  summarise(mean = mean(catchResponse)) %>%
+  ungroup() %>%
+  spread(catchQuestionAbbr, mean)
+cor.test(df_cd$baseRateOpp, df_cd$baseRatePla)
+```
 
 ## SENDER ##
+
+### P (lie | k)
+
+```{r}
+lieRateCond <- df.e2 %>%
+  filter(role == "Sender") %>%
+  group_by(p.s, p.r) %>%
+  summarise(n = n(),
+            propLies = sum(k != ksay)/n(),
+            se = sqrt(propLies*(1-propLies)/n)) %>%
+  mutate(propLiesTxt = paste0(round(100*propLies,1), "% lies"),
+         p.s.txt = factor(paste0("sender ",p.s*100, "% red")),
+         p.r.txt = factor(paste0(p.r*100, "% red")))
+
+lieRateCond %>%
+  mutate(p.liar = p.s.txt,
+         p.detector = str_replace(p.r.txt, "receiver ", "")) %>%
+  ggplot(aes(x=p.detector, y=propLies, fill=p.detector)) +
+  geom_bar(stat="identity", position="dodge", colour="black", width=1) +
+  geom_errorbar(aes(x=p.detector, min=propLies-se, max=propLies+se), 
+                width=.3, position=position_dodge(.9), colour="black") +
+  scale_x_discrete("Receiver's Base Rate") +
+  scale_y_continuous("Lying Frequency", limits=c(0,1), breaks=seq(0,1,.2), expand=c(0,0)) +
+  scale_fill_manual(values = my_red, guide=FALSE) +
+  facet_wrap(~p.liar) +
+  theme_bw() +
+  theme(strip.background = element_rect(fill="snow2"),
+        strip.text=element_text(size=11),
+        axis.text=element_text(size=10),
+        axis.title=element_text(size=12),
+        legend.position="bottom",
+        legend.text=element_text(size=11))
+ggsave("img/expt2ratelies.pdf", width=7, height=3.45) 
+```
+
+```{r}
+df_rate <- df.e2 %>%
+  filter(role == "Sender") %>%
+  mutate(lie = k != ksay,
+         p_s = relevel(as.factor(p.s.txt), ref="p_s = 0.5"),
+         p_r = relevel(as.factor(p.r.txt), ref="p_r = 0.5"))
+
+e2.m.rate <- glmer(lie ~ p_s + p_r + (1 | subjID), data=df_rate, family="binomial")
+e2.m.rate.nopr <- glmer(lie ~ p_s + (1 | subjID), data=df_rate, family="binomial")
+anova(e2.m.rate.nopr, e2.m.rate, test="Chisq")
+e2.m.rate.nops <- glmer(lie ~ p_r + (1 | subjID), data=df_rate, family="binomial")
+anova(e2.m.rate.nops, e2.m.rate, test="Chisq")
+```
+
+
+### P (ksay | lie, k)
+```{r}
+lies.df.e2 <- df.e2 %>%
+  filter(role == "Sender", k != ksay) %>%
+  mutate(p.s.txt = factor(paste0("sender ", p.s*100, "% red"),
+                          levels=c("sender 80% red", "sender 50% red", "sender 20% red")),
+         p.r.txt = factor(paste0("receiver ", p.r*100, "% red"), 
+                          levels=c("receiver 20% red", "receiver 50% red", "receiver 80% red")))
+
+lies.lm.df.e2 <- data.frame()
+for(p_s in unique(lies.df.e2$p.s.txt)){
+  for(p_r in unique(lies.df.e2$p.r.txt)){
+    temp = filter(lies.df.e2, p.s.txt==p_s & p.r.txt==p_r) %>%
+      mutate(k = k-5)
+    summ = summary(lmer(ksay ~ k + (1|subjID), data=temp))
+    lies.lm.df.e2 <- bind_rows(lies.lm.df.e2,
+                            data.frame(p.s.txt=p_s,
+                                       p.r.txt=p_r,
+                                       beta_0=coef(summ)['(Intercept)','Estimate'],
+                                       beta_0_SE=coef(summ)['(Intercept)','Std. Error'],
+                                       beta_1=coef(summ)['k','Estimate'],
+                                       beta_1_SE=coef(summ)['k','Std. Error'],
+                                       beta_1_p=coef(summ)['k','Pr(>|t|)']))
+  }
+}
+lies.lm.df.e2 <- lies.lm.df.e2 %>%
+  mutate(beta_0_txt = str_pad(round(beta_0,2), 4, side="right", pad="0"),
+         beta_1_txt = str_pad(round(beta_1,2), 4, side="right", pad="0"),
+         lm = paste0("y = ", beta_0_txt, " + ", beta_1_txt, "x"),
+         beta_1_p = ifelse(beta_1_p < .0001, "p < 0.0001", paste("p =", round(beta_1_p, 4))))
+
+
+lies.df.e2 %>%
+  ggplot() +
+  geom_jitter(aes(x=k, y=ksay), size=0.1, colour="gray70") +
+  stat_summary(aes(x=k, y=ksay), size=0.3) +
+  geom_smooth(aes(x=k, y=ksay), method="lm", se=F, colour="darkviolet") +
+  geom_text(data=lies.lm.df.e2, aes(x=0, y=0.5, label=lm), hjust=0, size=3.5) +
+  #geom_text(data=lies.lm.df.e2, aes(x=10.5, y=0.5, label=lm), hjust=1, size=2.6, fontface="bold") +
+  geom_vline(xintercept=5, linetype=2, size=0.3, colour="gray40") +
+  scale_x_continuous("Truth", limits=c(-.5, 10.5), breaks=seq(0,10,2)) +
+  scale_y_continuous("Reported Lie", breaks=seq(0,10,2)) +
+  facet_grid(p.s.txt ~ p.r.txt,
+             labeller = labeller(type = label_parsed)) +
+  theme_bw() +
+  theme(strip.background = element_rect(fill="snow2"),
+        strip.text=element_text(size=10),
+        axis.text=element_text(size=10),
+        axis.title=element_text(size=12))
+ggsave("img/expt2lmlies.png", width=6, height=6) #(5.5, 5.5)
+```
+
+```{r}
+catchFitsS <- allps %>%
+  filter(role == "Sender") %>%
+  mutate(p.detector = paste0(100*as.numeric(as.character(p.r)), "% red"),
+         p.liar = paste0("sender ", 100*as.numeric(as.character(p.s)), "% red"),
+         estimatedBR = 10*p.star)
+
+lies.lm.df.e2 %>%
+  mutate(p.liar = p.s.txt,
+         p.detector = str_replace(p.r.txt, "receiver ", ""),
+         p.liar = factor(p.liar, levels=c("sender 20% red", "sender 50% red", "sender 80% red"))) %>%
+  ggplot(aes(x=p.detector, y=beta_0, fill=p.detector)) +
+  geom_bar(stat="identity", position="dodge", colour="black", width=1) +
+  geom_errorbar(aes(x=p.detector, min=beta_0-beta_0_SE, max=beta_0+beta_0_SE), 
+                width=.3, position=position_dodge(.9), colour="black") +
+  geom_point(data=catchFitsS, aes(x=p.detector, y=estimatedBR, shape=catchQuestionAbbr, size=catchQuestionAbbr),
+             colour="black", stroke=1) +
+  geom_line(data=catchFitsS, aes(x=p.detector, y=estimatedBR, group=catchQuestionAbbr, linetype=catchQuestionAbbr),
+             colour="black") +
+  # geom_text(aes(label=round(meanAlph, 2)), 
+  #           position=position_dodge(width=0.9), vjust=-1.5) +
+  scale_x_discrete("Receiver's Base Rate") +
+  scale_y_continuous("Mean Lie", limits=c(0,10), breaks=seq(0,10,2), expand=c(0,0)) +
+  scale_fill_manual(values = my_red, guide=FALSE) +
+  scale_shape_manual("sender's belief about:", values = c(42,1), labels=c("receiver's base rate belief", "sender's base rate belief")) +
+  scale_size_manual(values=c(8,2.5)) +
+  guides(size=F, linetype = F,
+         shape = guide_legend(override.aes = list(size = c(7,2)))) +
+  facet_wrap(~p.liar) +
+  theme_bw() +
+  theme(strip.background = element_rect(fill="snow2"),
+        strip.text=element_text(size=11),
+        axis.text=element_text(size=10),
+        axis.title=element_text(size=12),
+        legend.position="bottom",
+        legend.text=element_text(size=11))
+ggsave("img/expt2_meanLie.pdf", width=7, height=4)
+```
+
+```{r}
+centeredLies.e2 <- lies.df.e2 %>%
+  mutate(k = k - 5) %>%
+  rename(p_s = p.s.txt,
+         p_r = p.r.txt)
+
+model_full <- lmer(ksay ~ k * p_r * p_s + (1 | subjID), data=centeredLies.e2, REML=F)
+
+model_full_SSE <- sum(resid(model_full)^2) #SSE = 16868.68
+model_full_DFE <- df.residual(model_full) #df = 5132
+model_full_MSE = model_full_SSE / model_full_DFE
+model_full_SSPR<- anova(model_full)['p_r','Sum Sq']
+model_full_DFPR <- anova(model_full)['p_r','NumDF']
+model_full_SSPS<- anova(model_full)['p_s','Sum Sq']
+model_full_DFPS <- anova(model_full)['p_s','NumDF']
+
+model_full_nops <- lmer(ksay ~ k * p_r + (1 | subjID), data=centeredLies.e2, REML=F)
+anova(model_full, model_full_nops, test="chisq")
+model_full_nopr <- lmer(ksay ~ k * p_s + (1 | subjID), data=centeredLies.e2, REML=F)
+anova(model_full, model_full_nopr, test="chisq")
+
+(model_full_SSPR - model_full_DFPR*model_full_MSE) / (model_full_SSPR + (N - model_full_DFPR)*model_full_MSE)
+(model_full_SSPS - model_full_DFPS*model_full_MSE) / (model_full_SSPS + (N - model_full_DFPS)*model_full_MSE)
+```
+
+
+
+# Additional Analyses for R&R
+
+## Results of RECEIVER in Expt 2?
+
+```{r}
+df.e2 %>%
+  filter(role == "Receiver") %>%
+  group_by(p.s, p.r, ksay) %>%
+  summarise(n = n(),
+            prop = mean(callBS),
+            se = sqrt((prop*(1-prop)/n()))) %>%
+  mutate(p.s.txt = paste0("sender ", p.s*100, "% red"),
+         p.r.txt = paste0("receiver ", p.r*100, "% red")) %>%
+  ggplot(aes(x=ksay, y=prop, colour=p.r.txt, fill=p.r.txt)) +
+  geom_point() +
+  geom_ribbon(aes(ymin=prop-se, ymax=prop+se), alpha=0.3, colour="gray32", size=0.25) +
+  geom_line() +
+  ggtitle("Experiment 2 Receiver's Rate of Calling BS") +
+  scale_x_continuous("Reported Red Marbles", breaks=seq(0,10,2), expand=c(0,0)) +
+  scale_y_continuous("Receiver Prop. BS Called", limits=c(0,1)) +
+  scale_colour_manual("", values=my_red) +
+  scale_fill_manual(values=my_red) +
+  guides(fill=FALSE) +
+  facet_grid(p.s.txt~.) +
+  theme_bw() +
+  theme(strip.background = element_rect(fill="snow2"),
+        strip.text=element_text(size=11),
+        axis.text=element_text(size=10),
+        axis.title=element_text(size=12),
+        legend.position="bottom",
+        legend.text=element_text(size=11))
+ggsave("img/expt2detectResults.pdf", width=5, height=8)
+
+df.e2 %>%
+  filter(role == "Receiver") %>%
+  count(callBS) %>%
+  mutate(prop = n/sum(n))
+
+df %>%
+  filter(role == "receiver") %>%
+  count(callBS) %>%
+  mutate(prop = n/sum(n))
+```
+
+## Rate of lying with p as a predictor
+```{r}
+expt.S.full.m <- expt.S.full %>%
+  mutate(p = as.factor(p),
+         p = relevel(p, ref="0.5"))
+
+m.lieRate.new <- glmer(lie ~ k * util + p + (1 | subjID), family=binomial(), data = expt.S.full.m) #random slope? (1 + expt | subjID)
+summary(m.lieRate.new)
+```
+
+
+
+## Do the results qualitatively change if the exclusion criteria of 75% changes?
+
+see criterion0.R
+
+## Individual-level analysis of senders and receivers in expt 1
+
+see individuals.R
 
 
 
