@@ -1,5 +1,8 @@
 # RationalLying
 
+
+## Experiment 1
+
 How do liars and lie detectors use (recursive) social reasoning to generate and detect lies?
 3x2 condition (20%, 50%, 80% base rate, red vs blue payoff for sender)
 
@@ -10,3 +13,11 @@ How do liars and lie detectors use (recursive) social reasoning to generate and 
 - Artificially inflated rate of marbles drawn and reported: Marble drawing sampled from uniform-binomial mixture distribution
 
 This repo contains the model, experiment (redpayoff, bluepayoff) and analyses.
+
+
+
+
+## Experiment 2
+
+Can liars adjust their lies to detectors' beliefs rather than liars' own beliefs?
+3x3 within-subject condition (20%, 50%, 80% sender base-rate & 20%, 50%, 80% receiver base-rate)

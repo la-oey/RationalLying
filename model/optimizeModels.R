@@ -5,9 +5,10 @@ models.sources = paste0("modelFuncs/",list.files("modelFuncs"))
 sapply(models.sources, source)
 
 library(stats4)
+library(tidyverse)
 
-humanLie <- expt.S.full
-humanDetect <- expt.R.full
+humanLie <- read_csv("expt_sender_full.csv")
+humanDetect <- read_csv("expt_receiver_full.csv")
 
 #### General Functions ####
 logitToProb <- function(logit){
@@ -22,24 +23,28 @@ probToLogit <- function(prob){
 
 
 # 121 x 6 matrix
-# humanLieCounts <- humanLie %>%
-#   count(expt, probabilityRed, drawnRed, reportedDrawn) %>%
-#   complete(expt=c("expt4","expt5"), probabilityRed=c(0.2,0.5,0.8), drawnRed=0:10, reportedDrawn=0:10, fill = list(n = 0)) %>%
-#   pull(n) %>%
-#   matrix(nrow=121)
 humanLieCounts <- humanLie %>%
-  count(p, k, ksay) %>%
-  complete(p=c(0.2,0.5,0.8), k=0:10, ksay=0:10, fill = list(n = 0)) %>%
+  count(util, p, k, ksay) %>%
+  complete(util=c("red","blue"), p=c(0.2,0.5,0.8), k=0:10, ksay=0:10, fill = list(n = 0)) %>%
+  mutate(util = factor(util, levels=c("red","blue"))) %>%
+  arrange(util, p, k, ksay) %>%
   pull(n) %>%
   matrix(nrow=121)
+# humanLieCounts <- humanLie %>%
+#   count(p, k, ksay) %>%
+#   complete(p=c(0.2,0.5,0.8), k=0:10, ksay=0:10, fill = list(n = 0)) %>%
+#   pull(n) %>%
+#   matrix(nrow=121)
 
 # 22 x 6 matrix
-# humanDetectCounts <- humanDetect %>%
-#   count(expt, probabilityRed, reportedDrawn, callBS) %>%
-#   complete(expt=c("expt4","expt5"), probabilityRed=c(0.2,0.5,0.8), reportedDrawn=0:10, callBS=c(TRUE,FALSE), fill = list(n = 0))
 humanDetectCounts <- humanDetect %>%
-  count(p, ksay, callBS) %>%
-  complete(p=c(0.2,0.5,0.8), ksay=0:10, callBS=c(TRUE,FALSE), fill = list(n = 0))
+  count(util, p, ksay, callBS) %>%
+  complete(util=c("red","blue"), p=c(0.2,0.5,0.8), ksay=0:10, callBS=c(TRUE,FALSE), fill = list(n = 0)) %>%
+  mutate(util = factor(util, levels=c("red","blue"))) %>%
+  arrange(util)
+# humanDetectCounts <- humanDetect %>%
+#   count(p, ksay, callBS) %>%
+#   complete(p=c(0.2,0.5,0.8), ksay=0:10, callBS=c(TRUE,FALSE), fill = list(n = 0))
 
 humanDetectCounts.T <- humanDetectCounts %>%
   filter(callBS) %>%
@@ -77,7 +82,7 @@ eval.r <- function(matr, ns.T, ns.F){ #ns = 11 x 6 matrix of counts for all cond
 
 
 st = 1
-end = 3
+end = 6
 modelsEval = list(
   # # # # # # # #
   # # no ToM # #
@@ -187,7 +192,7 @@ modelsEval = list(
 # ///////////////////////////////
 
 # no ToM
-# load("../analysis/Rdata/noToMfit.Rdata") 
+load("../analysis/Rdata/noToMfit.Rdata") 
 start_time <- Sys.time()
 noToMeval = modelsEval$noToM()
 print(Sys.time() - start_time)
@@ -219,9 +224,10 @@ noToMeval.r <- -2*eval.r(
 
 
 # recursive ToM
-# load("../analysis/Rdata/recurseToMfit.Rdata") 
+load("../analysis/Rdata/recurseToMfit.Rdata") 
+recurseToMeval.save <- recurseToMeval
 start_time <- Sys.time()
-for(i in 1:20){
+for(i in 1:40){
   tryCatch({
     recurseToMeval = modelsEval$recurseToM()
     break
@@ -230,7 +236,7 @@ for(i in 1:20){
   })
 }
 print(Sys.time() - start_time)
-# save(recurseToMeval, file="../analysis/Rdata/recurseToMfit.Rdata")
+save(recurseToMeval, file="../analysis/Rdata/recurseToMfit.Rdata")
 
 recurseToMeval.s <- -2*eval.s(
   recurseToM.pred(
