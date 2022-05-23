@@ -12,7 +12,7 @@ csvwriter = csv.writer(raw)
 head = 0
 
 for f in files: #iterate through files in folder
-	if f not in [".DS_Store", ".json"]:
+	if f not in [".DS_Store", ".", "..", ".json"]:
 		with io.open(mypath+f,'r',encoding='utf-8',errors='ignore') as f:
 			content = f.read()
 			parsed = json.loads(content)
